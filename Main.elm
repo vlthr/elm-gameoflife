@@ -53,7 +53,24 @@ glider = [(0,0), (0,1), (0,2), (1,2), (2,1)]
 --get : Grid -> Coords -> Cell
 
 nextGrid : Input -> Grid -> Grid
-nextGrid input grid = grid
+nextGrid input grid = {grid | cells <- keyMap (\ (r, c) cell -> {cell | state <- nextState grid (r, c) }) grid.cells}
+
+alive : Cell -> Bool
+alive cell = cell.state
+
+nextState : Grid -> Coords -> Bool
+nextState grid coords = neighbours coords
+                      |> List.filterMap (\neighbour -> Dict.get neighbour grid.cells)
+                      |> List.filter alive
+                      |> List.length
+                      |> (<) 4
+
+
+neighbours : Coords -> List Coords
+neighbours (r, c) = [
+            (r-1, c-1), (r-1, c), (r-1, c+1),
+            (r, c-1), (r, c), (r, c+1),
+            (r+1, c-1), (r+1, c), (r+1, c+1)]
 
 colorLive = rgb 0xFF 0xFF 0xFF
 colorDead = rgb 0x00 0x00 0x00
@@ -91,7 +108,7 @@ input : Signal (Int, Int)
 input = sampleOn Mouse.clicks Mouse.position
 
 main : Signal Element
-main = renderGrid <~ (sampleOn (fps 1) Window.dimensions) ~ (foldp nextGrid (initGrid 100 100) input)
+main = renderGrid <~ (sampleOn (fps 10) Window.dimensions) ~ (foldp nextGrid (initGrid 100 100) input)
 
 -- main = Signal.map show Mouse.position
 
