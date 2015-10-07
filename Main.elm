@@ -1,3 +1,4 @@
+module Main where
 import Html exposing (div, button, text)
 import Html.Events exposing (onClick)
 import Window
@@ -10,7 +11,7 @@ import List exposing (map, foldr, head, isEmpty, indexedMap, repeat, concat)
 import Touch
 import Mouse
 import Random
-
+import Dict
 
 type alias State = Bool
 type alias Input = (Int, Int)
@@ -20,11 +21,13 @@ type alias Cell = {
     state : State
   }
 type alias Grid = {
-    rows : List (List Cell)
+    cells : Dict.Dict (Int, Int) Cell
   }
 
 initGrid : Int -> Int -> Grid
-initGrid r c = { rows = repeat r (repeat c {state = False})}
+initGrid r c = { cells = Dict.fromList (concat <| for [0..r-1] <| \ri ->
+                                           for [0..c-1] <| \ci ->
+                                               ((ri, ci), {state = False}))}
                 |> apply (10,10) glider
 
 type alias Creature = List Coords
@@ -37,8 +40,14 @@ dblIndexedUpdate fn list = let -- elemFn = \r c elem -> fn r c elem
                 rowFn rowIndex column = indexedMap (\c elem -> fn rowIndex c elem) column
                 in indexedMap rowFn list
 
+for : List a -> (a -> b) -> List b
+for xs f = List.map f xs
+
+rebase : Coords -> Creature -> Creature
+rebase (baseR, baseC) creature = (map ( \ (r, c) -> (r+baseR, c+baseC)) creature)
+
 apply : Coords -> Creature -> Grid -> Grid
-apply (baseR, baseC) creature grid = {grid | rows <- updateIndexes (\cell -> {cell | state <- True}) grid.rows (map ( \ (r, c) -> (r+baseR, c+baseC)) creature)}
+apply (baseR, baseC) creature grid = {grid | cells <- updateKeys (\ (r, c) cell -> {cell | state <- True}) (rebase (baseR, baseC) creature) grid.cells }
 
 glider = [(0,0), (0,1), (0,2), (1,2), (2,1)]
 --get : Grid -> Coords -> Cell
@@ -68,8 +77,15 @@ dblIndexedMap fn list = let -- elemFn = \r c elem -> fn r c elem
                 rowFn rowIndex column = indexedMap (\c elem -> fn rowIndex c elem) column
                 in concat (indexedMap rowFn list)
 
+updateKeys : (comparable -> b -> b) -> List comparable -> Dict.Dict comparable b -> Dict.Dict comparable b
+updateKeys fn keys dict = foldr (\key d -> Dict.update key (Maybe.map (fn key)) d) dict keys
+
+-- Equivalent to updateKeys using all keys of the dict
+keyMap : (comparable -> b -> b) -> Dict.Dict comparable b -> Dict.Dict comparable b
+keyMap fn dict = updateKeys fn (Dict.keys dict) dict
+
 renderGrid : (Int, Int) -> Grid -> Element
-renderGrid (w', h') grid = collage w' h' <| (filled colorBackground (rect (toFloat w') (toFloat h'))) :: dblIndexedMap (\r c cell -> renderCell (r,c) (cellBottomLeft (w',h')) cell) grid.rows
+renderGrid (w', h') grid = collage w' h' <| (filled colorBackground (rect (toFloat w') (toFloat h'))) :: (map (\ ((r,c), cell) -> renderCell (r,c) (cellBottomLeft (w',h')) cell) (Dict.toList grid.cells))
 
 input : Signal (Int, Int)
 input = sampleOn Mouse.clicks Mouse.position
