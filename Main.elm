@@ -12,6 +12,7 @@ import Touch
 import Mouse
 import Random
 import Dict
+import Debug
 
 type alias State = Bool
 type alias Input = (Int, Int)
@@ -29,8 +30,16 @@ initGrid r c = { cells = Dict.fromList (concat <| for [0..r-1] <| \ri ->
                                            for [0..c-1] <| \ci ->
                                                ((ri, ci), {state = False}))}
                 |> apply (10,10) glider
+                |> apply (15,10) glider
+                |> apply (10,15) glider
+                -- |> apply (15,15) glider
 
 type alias Creature = List Coords
+
+fromJust : Maybe a -> a
+fromJust x = case x of
+        Just y -> y
+        Nothing -> Debug.crash "error: fromJust Nothing"
 
 updateIndexes : (a -> a) -> List (List a) -> List (Int, Int) -> List (List a)
 updateIndexes fn list indexes = dblIndexedUpdate (\r c el -> if List.member (r,c) indexes then fn el else el) list
@@ -58,18 +67,24 @@ nextGrid input grid = {grid | cells <- keyMap (\ (r, c) cell -> {cell | state <-
 alive : Cell -> Bool
 alive cell = cell.state
 
+rules : State -> Int -> Bool
+rules oldState nrNeighbours =
+                          case oldState of
+                                    True -> if nrNeighbours < 2 || nrNeighbours > 3 then False else True
+                                    False -> if nrNeighbours == 3 then True else False
+
 nextState : Grid -> Coords -> Bool
 nextState grid coords = neighbours coords
                       |> List.filterMap (\neighbour -> Dict.get neighbour grid.cells)
                       |> List.filter alive
                       |> List.length
-                      |> (<) 4
+                      |> rules (fromJust <| Dict.get coords grid.cells).state
 
 
 neighbours : Coords -> List Coords
 neighbours (r, c) = [
             (r-1, c-1), (r-1, c), (r-1, c+1),
-            (r, c-1), (r, c), (r, c+1),
+            (r, c-1), (r, c+1),
             (r+1, c-1), (r+1, c), (r+1, c+1)]
 
 colorLive = rgb 0xFF 0xFF 0xFF
@@ -105,11 +120,10 @@ renderGrid : (Int, Int) -> Grid -> Element
 renderGrid (w', h') grid = collage w' h' <| (filled colorBackground (rect (toFloat w') (toFloat h'))) :: (map (\ ((r,c), cell) -> renderCell (r,c) (cellBottomLeft (w',h')) cell) (Dict.toList grid.cells))
 
 input : Signal (Int, Int)
-input = sampleOn Mouse.clicks Mouse.position
+-- input = sampleOn Mouse.clicks Mouse.position
+input = sampleOn (fps 10) <| Signal.constant (0,0)
 
 main : Signal Element
-main = renderGrid <~ (sampleOn (fps 10) Window.dimensions) ~ (foldp nextGrid (initGrid 100 100) input)
+main = renderGrid <~ Window.dimensions ~ (foldp nextGrid (initGrid 70 50) input)
 
 -- main = Signal.map show Mouse.position
-
-
