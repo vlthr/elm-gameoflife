@@ -30,7 +30,7 @@ getCount : Coords -> Counter -> Int
 getCount coord counter = Maybe.withDefault 0 <| Dict.get coord counter
 
 type State = Living | Dead
-type Update = Tick Float | MouseClick Coords | WindowResize (Int, Int)
+type Update = Tick Float | MouseClick Coords
 type alias Coords = (Int, Int)
 type alias Origin = (Int, Int)
 type alias Cell = {
@@ -232,10 +232,11 @@ pairWithCells : List Coords -> Grid -> List (Coords, Cell)
 pairWithCells coordsList grid = map (\c -> (c, fromJust (Dict.get c grid.cells))) coordsList
 
 input : Signal Update
--- input = sampleOn Mouse.clicks Mouse.position
-input = Signal.merge
-            (Signal.dropRepeats <| Signal.map MouseClick clickedCells)
-            (Signal.map Tick (fps 2))
+input = let
+    clicked = clickedCells
+    clCells = Signal.map MouseClick <| Signal.dropRepeats <| clicked
+    ticks = (Signal.map Tick (Time.fpsWhen 2 <| Signal.map not <| (Time.second `Time.since` clicked)))
+    in Signal.merge clCells ticks
 
 clickedCells : Signal Coords
 clickedCells = let
