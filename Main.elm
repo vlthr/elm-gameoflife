@@ -30,7 +30,7 @@ getCount : Coords -> Counter -> Int
 getCount coord counter = Maybe.withDefault 0 <| Dict.get coord counter
 
 type State = Living | Dead
-type Update = Tick Float | MouseClick Coords
+type Update = Tick Float | MouseClick Coords | WindowSizeChange (Int, Int)
 type alias Coords = (Int, Int)
 type alias Origin = (Int, Int)
 type alias Cell = {
@@ -42,7 +42,8 @@ type alias Grid = {
     living : Set.Set Coords, -- All currently living cells
     nrLivingNeighbours : Counter, -- Counts the number of times each cell was counted as a neighbour to a an already living cell
     changed : List (Coords, StateChange), -- Changes made during the current iteration
-    dimensions : (Int, Int)
+    dimensions : (Int, Int),
+    fullRender : Bool
   }
 
 xytoRowCol : (Int, Int) -> (Int, Int) -> Coords
@@ -61,10 +62,11 @@ initGrid r c = { living = Set.empty,
                  nrLivingNeighbours = counter,
                  changed = [],
                  dimensions = (30,30),
-                 cells = Dict.empty}
-                |> apply (10,10) glider
-                |> apply (15,10) glider
-                |> apply (10,15) glider
+                 cells = Dict.empty,
+                 fullRender = True}
+                -- |> apply (10,10) glider
+                -- |> apply (15,10) glider
+                -- |> apply (10,15) glider
                 -- |> apply (15,15) glider
 
 type alias Creature = List Coords
@@ -119,7 +121,7 @@ scanCell coords grid = let
 applyRules : Grid -> Grid
 applyRules grid = let
                       currentState = (\coords -> if alive coords grid then Living else Dead)
-                      changes = List.map (\ (coords, nrNeighbours) -> (coords, rules (currentState coords) nrNeighbours)) <| Dict.toList grid.nrLivingNeighbours
+                      changes = List.filter (\ (coords, change) -> change == Birth || change == Death) <| List.map (\ (coords, nrNeighbours) -> (coords, rules (currentState coords) nrNeighbours)) <| Dict.toList grid.nrLivingNeighbours
                   in {grid | changed <- List.append grid.changed changes}
 
 kill : Coords -> Grid -> Grid
@@ -141,19 +143,31 @@ birthNew grid = let birthed = map fst <| List.filter (\ (coords, change) -> chan
               in newGrid
 
 newIteration : Grid -> Grid
-newIteration grid = {grid | changed <- [], nrLivingNeighbours <- counter}
+newIteration grid = {grid | changed <- [], nrLivingNeighbours <- counter, fullRender <- False}
+-- newIteration grid = {grid | nrLivingNeighbours <- counter}
 
 nextGrid : Update -> Grid -> Grid
-nextGrid input grid = case input of
-                        MouseClick (r,c) ->
-                          birth (r,c) grid
-                        Tick delta ->
-                          grid
-                            |> newIteration
-                            |> countNeighbours
-                            |> applyRules
-                            |> pruneDead
-                            |> birthNew
+nextGrid input grid = let
+  newFullRender = case input of
+            MouseClick (r,c) ->
+                False
+            Tick delta ->
+                False
+            WindowSizeChange (x, y) ->
+                True
+  newGrid = case input of
+            MouseClick (r,c) ->
+                birth (r,c) grid
+            Tick delta ->
+                grid
+                |> newIteration
+                |> countNeighbours
+                |> applyRules
+                |> pruneDead
+                |> birthNew
+            WindowSizeChange (x, y) ->
+                {grid | dimensions <- (x,y)}
+  in {newGrid | fullRender <- newFullRender}
 
 aliveCell : Cell -> Bool
 aliveCell cell = cell.state == Living
@@ -224,19 +238,38 @@ deadCells (r, c) = List.concat <| for [-r..r-1] <| \ri ->
                 for [-c..c-1] <| \ci ->
                   ((ri, ci), (newCell Dead))
 
+
+renderFull : (Int, Int) -> Grid -> Element
+renderFull (w', h') grid = renderForms (w', h') <| List.append (renderBackground (w', h')) (renderCells (cellBottomLeft (w', h')) <| log <| pairWithCells (Set.toList grid.living) grid)
+
 renderChanges : (Int, Int) -> Grid -> Element
-renderChanges (w', h') grid = renderForms (w', h') <| List.append (renderBackground (w', h')) <| renderCells (cellBottomLeft (w', h')) <| pairWithCells (Set.toList grid.living) grid
-                            -- False -> renderForms (w', h') <| renderBackground (w', h') :: (renderCells (cellBottomLeft (w', h')) <| pairWithCells (map fst grid.changed) grid)
+renderChanges (w', h') grid = renderForms (w', h') (renderCells (cellBottomLeft (w', h')) <| log <| pairWithCells (map fst <| log <| grid.changed) grid)
+-- renderChanges : (Int, Int) -> Grid -> Element
+-- renderChanges (w', h') grid = let a = log grid.changed
+--   in renderForms (w', h') <| List.append (renderBackground (w', h')) <| renderCells (cellBottomLeft (w', h')) <| pairWithCells (Set.toList grid.living) grid
+
+render : (Int, Int) -> Grid -> Element
+render wSize grid = case grid.fullRender of
+                      True ->
+                        renderFull wSize grid
+                      False ->
+                        renderChanges wSize grid
 
 pairWithCells : List Coords -> Grid -> List (Coords, Cell)
-pairWithCells coordsList grid = map (\c -> (c, fromJust (Dict.get c grid.cells))) coordsList
+pairWithCells coordsList grid = map (\ (coords, mcell) -> (coords, fromJust mcell)) <| List.filter (\ (coords, mcell) -> isJust mcell) <| List.map (\c -> (c ,Dict.get c grid.cells)) coordsList
+
+isJust : Maybe a -> Bool
+isJust m = case m of
+             Just a -> True
+             Nothing -> False
 
 input : Signal Update
 input = let
     clicked = clickedCells
     clCells = Signal.map MouseClick <| Signal.dropRepeats <| clicked
     ticks = (Signal.map Tick (Time.fpsWhen 2 <| Signal.map not <| (Time.second `Time.since` clicked)))
-    in Signal.merge clCells ticks
+    sizeChanges = Signal.map WindowSizeChange <| Signal.dropRepeats <| Window.dimensions
+    in Signal.mergeMany [sizeChanges, clCells, ticks]
 
 clickedCells : Signal Coords
 clickedCells = let
@@ -248,6 +281,4 @@ clickPositions : Signal (Int, Int)
 clickPositions = (Signal.sampleOn Mouse.clicks Mouse.position)
 
 main : Signal Element
-main = renderChanges <~ Window.dimensions ~ (foldp nextGrid (initGrid 70 50) input)
-
--- main = Signal.map show Mouse.position
+main = render <~ Window.dimensions ~ (foldp nextGrid (initGrid 70 50) input)
